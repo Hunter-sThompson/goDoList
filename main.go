@@ -60,6 +60,45 @@ func (tl *TaskList) displayTasks() {
 	fmt.Println()
 }
 
+func (tl *TaskList) searchTasks(keyword string) []Task {
+	var matchingTasks []Task
+
+	for _, task := range tl.Tasks {
+		if strings.Contains(strings.ToLower(task.Title), strings.ToLower(keyword)) ||
+			strings.Contains(strings.ToLower(task.Description), strings.ToLower(keyword)) {
+			matchingTasks = append(matchingTasks, task)
+		}
+	}
+
+	return matchingTasks
+}
+
+func (tl *TaskList) showStatistics() {
+	totalTasks := len(tl.Tasks)
+	completedTasks := 0
+	incompleteTasks := 0
+	totalPriority := 0
+
+	for _, task := range tl.Tasks {
+		if task.Status {
+			completedTasks++
+		} else {
+			incompleteTasks++
+		}
+		totalPriority += task.Priority
+	}
+
+	averagePriority := 0.0
+	if totalTasks > 0 {
+		averagePriority = float64(totalPriority) / float64(totalTasks)
+	}
+
+	fmt.Printf("Total tasks: %d\n", totalTasks)
+	fmt.Printf("Completed tasks: %d\n", completedTasks)
+	fmt.Printf("Incomplete tasks: %d\n", incompleteTasks)
+	fmt.Printf("Average priority: %.2f\n", averagePriority)
+}
+
 func (tl *TaskList) sortByDueDate() {
 	sort.SliceStable(tl.Tasks, func(i, j int) bool {
 		return tl.Tasks[i].DueDate.Before(tl.Tasks[j].DueDate)
@@ -142,7 +181,7 @@ func main() {
 	taskList := TaskList{Tasks: loadTasksFromDatabase(db)}
 
 	fmt.Println("Welcome to the TODO list manager!")
-	fmt.Println("Please enter a command (add, complete, remove, show, sortDate, sortPriority or exit):")
+	fmt.Println("Please enter a command (add, complete, remove, show, search, stats, sortDate, sortPriority or exit):")
 
 	for {
 		taskList.displayTasks()
@@ -214,6 +253,24 @@ func main() {
 			title = strings.TrimSpace(title)
 			taskList.showTask(title)
 
+		case "search":
+			fmt.Print("Enter a keyword to search for: ")
+			keyword, _ := reader.ReadString('\n')
+			keyword = strings.TrimSpace(keyword)
+
+			matchingTasks := taskList.searchTasks(keyword)
+			if len(matchingTasks) == 0 {
+				fmt.Println("No tasks found with the specified keyword.")
+			} else {
+				fmt.Printf("Tasks containing '%s':\n", keyword)
+				for _, task := range matchingTasks {
+					fmt.Printf("Title: %s, Description: %s\n", task.Title, task.Description)
+				}
+			}
+
+		case "stats":
+			taskList.showStatistics()
+
 		case "sortDate":
 			taskList.sortByDueDate()
 
@@ -225,7 +282,7 @@ func main() {
 			return
 
 		default:
-			fmt.Println("Invalid command. Please enter a valid command (add, complete, remove, show, or exit).")
+			fmt.Println("Invalid command. Please enter a valid command (add, complete, remove, show, search, stats, sortDate, sortPriority and exit).")
 		}
 	}
 }
