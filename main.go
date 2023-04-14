@@ -2,11 +2,14 @@ package main
 
 import (
 	"bufio"
+	"database/sql"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 	"time"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type Task struct {
@@ -34,23 +37,26 @@ func (tl *TaskList) removeTask(title string) {
 	}
 }
 
-func (tl *TaskList) showTask() {
+func (tl *TaskList) showTask(title string) {
 	for _, task := range tl.Tasks {
-		fmt.Println("Title:", task.Title)
-		fmt.Println("Description:", task.Description)
-		fmt.Println("Due Date:", task.DueDate)
-		fmt.Println("Priority:", task.Priority)
-		fmt.Println("Status:", task.Status)
-		fmt.Println()
+		if task.Title == title {
+			fmt.Println("Title:", task.Title)
+			fmt.Println("Description:", task.Description)
+			fmt.Println("Due Date:", task.DueDate.Format("02 January"))
+			fmt.Println("Priority:", task.Priority)
+			fmt.Println("Status:", task.Status)
+		}
 	}
 }
 
 func (tl *TaskList) displayTasks() {
+	fmt.Println("==========================================================")
 	fmt.Println("Title         || Due Date        || Priority || Status")
-	fmt.Println("--------------------------------------------------")
+	fmt.Println("----------------------------------------------------------")
 	for _, task := range tl.Tasks {
 		fmt.Printf("%-14s || %-15s || %-8d || %t\n", task.Title, task.DueDate.Format("02 January"), task.Priority, task.Status)
 	}
+	fmt.Println("==========================================================")
 	fmt.Println()
 }
 
@@ -66,47 +72,80 @@ func (tl *TaskList) sortByPriority() {
 	})
 }
 
+func initializeDatabase() *sql.DB {
+	db, err := sql.Open("sqlite3", "./tasks.db")
+	if err != nil {
+		panic(err)
+	}
+
+	statement, _ := db.Prepare(`CREATE TABLE IF NOT EXISTS tasks (
+		title TEXT PRIMARY KEY,
+		description TEXT,
+		duedate DATETIME,
+		priority INTEGER,
+		status BOOLEAN
+	);`)
+	statement.Exec()
+
+	return db
+}
+
+func saveTasksToDatabase(db *sql.DB, tasks []Task) {
+	statement, _ := db.Prepare("DELETE FROM tasks")
+	statement.Exec()
+
+	for _, task := range tasks {
+		statement, _ := db.Prepare("INSERT INTO tasks (title, description, duedate, priority, status) VALUES (?, ?, ?, ?, ?)")
+		statement.Exec(task.Title, task.Description, task.DueDate, task.Priority, task.Status)
+	}
+}
+
+func removeTaskFromDatabase(db *sql.DB, title string) error {
+	statement, err := db.Prepare("DELETE FROM tasks WHERE title = ?")
+	if err != nil {
+		return err
+	}
+	defer statement.Close()
+
+	_, err = statement.Exec(title)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func loadTasksFromDatabase(db *sql.DB) []Task {
+	rows, _ := db.Query("SELECT title, description, duedate, priority, status FROM tasks")
+	defer rows.Close()
+
+	var tasks []Task
+	for rows.Next() {
+		var title, description string
+		var dueDate time.Time
+		var priority int
+		var status bool
+
+		rows.Scan(&title, &description, &dueDate, &priority, &status)
+		task := Task{Title: title, Description: description, DueDate: dueDate, Priority: priority, Status: status}
+		tasks = append(tasks, task)
+	}
+
+	return tasks
+}
+
 func main() {
 	reader := bufio.NewReader(os.Stdin)
-	taskList := TaskList{}
+	db := initializeDatabase()
+	defer db.Close()
 
-	task1 := Task{
-		Title:       "Task 1",
-		Description: "This is task 1",
-		DueDate:     time.Now().AddDate(0, 0, 7),
-		Priority:    2,
-		Status:      false,
-	}
-
-	task2 := Task{
-		Title:       "Task 2",
-		Description: "This is task 2",
-		DueDate:     time.Now().AddDate(0, 0, 3),
-		Priority:    1,
-		Status:      false,
-	}
-
-	taskList.addTask(task1)
-	taskList.addTask(task2)
-
-	// taskList.showTasks()
-
-	// taskList.sortByDueDate()
-	// fmt.Println("Sorted by due date:")
-	// taskList.showTasks()
-
-	// taskList.sortByPriority()
-	// fmt.Println("Sorted by priority:")
-	// taskList.showTasks()
-
-	// taskList.removeTask("Task 1")
-	// fmt.Println("Task 1 removed:")
-	// taskList.showTasks()
+	taskList := TaskList{Tasks: loadTasksFromDatabase(db)}
 
 	fmt.Println("Welcome to the TODO list manager!")
-	fmt.Println("Please enter a command (add, complete, remove, show, or exit):")
+	fmt.Println("Please enter a command (add, complete, remove, show, sortDate, sortPriority or exit):")
 
 	for {
+		taskList.displayTasks()
 		fmt.Print("> ")
 		input, _ := reader.ReadString('\n')
 		command := strings.TrimSpace(input)
@@ -139,6 +178,7 @@ func main() {
 			}
 
 			taskList.addTask(task)
+			saveTasksToDatabase(db, taskList.Tasks)
 			fmt.Println("Task added successfully!")
 
 		case "complete":
@@ -159,11 +199,26 @@ func main() {
 			title, _ := reader.ReadString('\n')
 			title = strings.TrimSpace(title)
 
-			taskList.removeTask(title)
-			fmt.Println("Task removed successfully!")
+			err := removeTaskFromDatabase(db, title)
+			if err != nil {
+				fmt.Println("Error removing task:", err)
+			} else {
+				taskList.removeTask(title)
+				fmt.Println("Task removed successfully!")
+			}
 
 		case "show":
-			taskList.displayTasks()
+
+			fmt.Print("Enter the title of the task you want to be shown: ")
+			title, _ := reader.ReadString('\n')
+			title = strings.TrimSpace(title)
+			taskList.showTask(title)
+
+		case "sortDate":
+			taskList.sortByDueDate()
+
+		case "sortPriority":
+			taskList.sortByPriority()
 
 		case "exit":
 			fmt.Println("Goodbye!")
